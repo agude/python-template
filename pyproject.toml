@@ -43,8 +43,9 @@ dev = [
 # Ignore releases younger than a week, so a compromised upload has time to be
 # noticed and yanked before it reaches the lock. Dependabot's cooldown matches.
 exclude-newer = "7 days"
-# Older uv releases cannot install the final release of Python 3.15.
-required-version = ">=0.13"
+# Dependabot uses uv 0.12.18 to update the lock on Python 3.11.
+# Use uv 0.13 or newer to download the final release of Python 3.15.
+required-version = ">=0.12.18"
 
 [tool.uv.build-backend]
 # Explicit, so the distribution name can differ from the import name.
