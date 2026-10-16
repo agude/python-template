@@ -22,6 +22,7 @@ CI pass.
 | `just check` | Runs lint, type-check, and test. Run it before every commit. |
 | `just build package-check` | Builds the package, installs the wheel in a clean environment, and smoke-tests it. |
 | `just lock` | Updates `uv.lock` after a dependency change. |
+| `just release <bump>` | Bumps the version, commits, and tags. Does not push. |
 
 ## Rules
 
@@ -30,8 +31,8 @@ CI pass.
 - `exclude-newer = "7 days"` in `pyproject.toml` hides releases younger than
   a week. Do not remove it to get a newer release; wait for the release to
   age.
-- The version exists only in `pyproject.toml`. Code reads it with
-  `importlib.metadata.version()`.
+- The version exists only in `pyproject.toml`. Change it with
+  `just release`. Code reads it with `importlib.metadata.version()`.
 - Workflows call `just` recipes and nothing else, apart from setup steps. To
   change what CI does, change a recipe.
 - Actions are pinned to a full commit SHA with a `# vX.Y.Z` comment, every

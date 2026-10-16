@@ -98,6 +98,46 @@ package-check: build
     "$scratch/venv/bin/example-command" --help >/dev/null
     echo "package-check: ${wheels[0]#dist/} installs and reports version $installed"
 
+# Bump the version, then commit and tag it. Does not push.
+release bump:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+        echo "release: commit or remove every change, including untracked files" >&2
+        exit 1
+    fi
+    tag="v$(uv version --bump {{ quote(bump) }} --dry-run --short)"
+    if git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null; then
+        echo "release: tag $tag already exists" >&2
+        exit 1
+    fi
+    just check
+    uv version --bump {{ quote(bump) }} --frozen
+    uv lock
+    git add pyproject.toml uv.lock
+    git commit --quiet --message "Release $tag"
+    git tag --annotate "$tag" --message "Release $tag"
+    echo "release: committed and tagged $tag. Push with: git push origin HEAD $tag"
+
+# The argument wins over GITHUB_REF_NAME, which CI sets on tag pushes.
+
+# Check that a release tag matches the version in pyproject.toml.
+release-check tag="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag={{ quote(tag) }}
+    tag="${tag:-${GITHUB_REF_NAME:-}}"
+    if [[ -z "$tag" ]]; then
+        echo "release-check: pass a tag, or set GITHUB_REF_NAME" >&2
+        exit 2
+    fi
+    version="$(uv version --short)"
+    if [[ "$tag" != "v$version" ]]; then
+        echo "release-check: tag $tag does not match version $version in pyproject.toml" >&2
+        exit 1
+    fi
+    echo "release-check: tag $tag matches pyproject.toml"
+
 # Remove build output, tool caches, and the virtual environment.
 clean:
     rm -rf .coverage .mypy_cache .pytest_cache .ruff_cache .venv build dist htmlcov
