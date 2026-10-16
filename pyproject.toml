@@ -18,9 +18,11 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = []
+# init:cli-begin
 
 [project.scripts]
 example-command = "example_package.cli:main"
+# init:cli-end
 
 [build-system]
 requires = ["uv_build>=0.12,<0.14"]

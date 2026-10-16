@@ -1,1 +1,9 @@
 * text=auto eol=lf
+# init:template-begin
+
+# Template-only files. `git archive` omits them, so scripts/init never copies
+# them into a new project.
+/scripts/init export-ignore
+/tests/init export-ignore
+/.github/workflows/template-test.yml export-ignore
+# init:template-end

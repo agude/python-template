@@ -95,7 +95,9 @@ package-check: build
         echo "package-check: wheel reports version $installed, pyproject.toml has $expected" >&2
         exit 1
     fi
+    # init:cli-begin
     "$scratch/venv/bin/example-command" --help >/dev/null
+    # init:cli-end
     echo "package-check: ${wheels[0]#dist/} installs and reports version $installed"
 
 # Bump the version, then commit and tag it. Does not push.
@@ -118,6 +120,7 @@ release bump:
     git commit --quiet --message "Release $tag"
     git tag --annotate "$tag" --message "Release $tag"
     echo "release: committed and tagged $tag. Push with: git push origin HEAD $tag"
+# init:publish-begin
 
 # The argument wins over GITHUB_REF_NAME, which CI sets on tag pushes.
 
@@ -137,7 +140,32 @@ release-check tag="":
         exit 1
     fi
     echo "release-check: tag $tag matches pyproject.toml"
+# init:publish-end
 
 # Remove build output, tool caches, and the virtual environment.
 clean:
     rm -rf .coverage .mypy_cache .pytest_cache .ruff_cache .venv build dist htmlcov
+# init:template-begin
+
+# Lint scripts/init and run its Bats tests.
+test-init:
+    shellcheck scripts/init tests/init/*.bats
+    bats tests/init
+
+# Create a project from HEAD with one init variant, then check it.
+test-generated variant:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case {{ quote(variant) }} in
+        cli) flags=() ;;
+        library) flags=(--library) ;;
+        no-publish) flags=(--no-publish) ;;
+        custom-names) flags=(--distribution custom-dist --command custom-cmd) ;;
+        *) echo "test-generated: unknown variant: {{ variant }}" >&2; exit 2 ;;
+    esac
+    root="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/test-generated.XXXXXX")"
+    trap 'rm -rf "$root"' EXIT
+    scripts/init "$root/out" generated_project --ref HEAD ${flags[@]+"${flags[@]}"}
+    cd "$root/out"
+    just sync check package-check
+# init:template-end

@@ -2,6 +2,28 @@
 
 Guidance for coding agents that work in this repository.
 
+<!-- init:template-begin -->
+## This repository is a template
+
+`scripts/init` creates projects from this repository; `README.md` describes
+how. When you change the template:
+
+- Keep it a working project. `just check package-check` must pass with the
+  placeholders in place.
+- Write the placeholders `example_package`, `example-package`, and
+  `example-command` only where the project's own names belong. `init`
+  replaces every occurrence and fails on any other case variant.
+- Wrap optional content in `init:<name>-begin` and `init:<name>-end`
+  comments, using the existing names `template`, `cli`, and `publish`. Do not
+  nest blocks.
+- Mark files that only the template needs as `export-ignore` in
+  `.gitattributes`.
+- After changing `scripts/init` or a marker block, run `just test-init` and
+  `just test-generated <variant>` for each affected variant.
+- `scripts/init` must run under Bash 3.2 with BSD or GNU tools: no `sed -i`,
+  no associative arrays, and no `grep -P`.
+
+<!-- init:template-end -->
 ## Project
 
 example-package is a Python package with the import name `example_package`

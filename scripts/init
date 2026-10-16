@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+# Create a new project from this template. Run `scripts/init --help` for usage.
+#
+# The project comes from a committed ref through `git archive`, so changes
+# that are not committed in this clone are not used, and the export-ignore
+# entries in .gitattributes keep template-only files out. All work happens in
+# a staging directory that is moved to <dest> only after every step succeeds.
+#
+# This script must run under Bash 3.2 with BSD or GNU tools.
+
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: scripts/init <dest> <import-name> [options]
+
+Create a new Python project at <dest> from this template.
+
+Arguments:
+  <dest>                Directory to create. It must not exist.
+  <import-name>         Python import name, such as my_package.
+
+Options:
+  --distribution NAME   Distribution name. Default: <import-name> with _ as -.
+  --command NAME        Console script name. Default: the distribution name.
+  --library             Leave out the command-line interface.
+  --no-publish          Leave out the PyPI release workflow.
+  --ref REF             Template ref to copy. Default: origin/main, fetched first.
+  -h, --help            Show this help.
+EOF
+}
+
+die() {
+    echo "init: $*" >&2
+    exit 1
+}
+
+usage_error() {
+    echo "init: $*" >&2
+    echo "Run 'scripts/init --help' for usage." >&2
+    exit 2
+}
+
+# The template's placeholders. No placeholder contains another, and no
+# accepted name contains a placeholder, so substitutions cannot interact.
+IMPORT_PLACEHOLDER="example_package"
+DISTRIBUTION_PLACEHOLDER="example-package"
+COMMAND_PLACEHOLDER="example-command"
+# Any case variant of a placeholder, and any marker line, is a template defect
+# once the substitution has run.
+LEFTOVER_PATTERN='example[-_](package|command)|init:[a-z]+-(begin|end)'
+MARKER_PATTERN='init:[a-z]+-(begin|end)'
+
+dest=""
+import_name=""
+distribution=""
+command_name=""
+library="false"
+publish="true"
+ref="origin/main"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --distribution | --command | --ref)
+            [ $# -ge 2 ] || usage_error "$1 needs a value"
+            case "$1" in
+                --distribution) distribution="$2" ;;
+                --command) command_name="$2" ;;
+                --ref) ref="$2" ;;
+            esac
+            shift 2
+            ;;
+        --library)
+            library="true"
+            shift
+            ;;
+        --no-publish)
+            publish="false"
+            shift
+            ;;
+        -*)
+            usage_error "unknown option: $1"
+            ;;
+        *)
+            if [ -z "$dest" ]; then
+                dest="$1"
+            elif [ -z "$import_name" ]; then
+                import_name="$1"
+            else
+                usage_error "unexpected argument: $1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$dest" ] || [ -z "$import_name" ]; then
+    usage_error "<dest> and <import-name> are required"
+fi
+
+# Bash 3.2 treats a quoted right-hand side of =~ as a literal string, so the
+# patterns live in variables.
+import_pattern='^[a-z_][a-z0-9_]*$'
+name_pattern='^[a-z0-9]+(-[a-z0-9]+)*$'
+
+[[ "$import_name" =~ $import_pattern ]] ||
+    die "import name '$import_name' must match $import_pattern"
+case "$import_name" in
+    and | as | assert | async | await | break | class | continue | def | del | elif | else | \
+        except | finally | for | from | global | if | import | in | is | lambda | nonlocal | \
+        not | or | pass | raise | return | try | while | with | yield)
+        die "import name '$import_name' is a Python keyword"
+        ;;
+esac
+
+if [ -z "$distribution" ]; then
+    distribution="$(printf '%s' "$import_name" | tr '_' '-')"
+fi
+[[ "$distribution" =~ $name_pattern ]] ||
+    die "distribution name '$distribution' must match $name_pattern; pass --distribution"
+
+if [ "$library" = "true" ]; then
+    [ -z "$command_name" ] || usage_error "--command does not apply to --library"
+else
+    if [ -z "$command_name" ]; then
+        command_name="$distribution"
+    fi
+    [[ "$command_name" =~ $name_pattern ]] ||
+        die "command name '$command_name' must match $name_pattern"
+fi
+
+for name in "$import_name" "$distribution" "$command_name"; do
+    if printf '%s' "$name" | grep -qiE 'example[-_](package|command)'; then
+        die "name '$name' contains a template placeholder"
+    fi
+done
+
+case "$dest" in
+    /*) ;;
+    *) dest="$PWD/$dest" ;;
+esac
+dest_parent="$(dirname "$dest")"
+[ -d "$dest_parent" ] || die "parent directory does not exist: $dest_parent"
+if [ -e "$dest" ] || [ -L "$dest" ]; then
+    die "destination already exists: $dest"
+fi
+
+command -v git >/dev/null 2>&1 || die "git is required"
+command -v uv >/dev/null 2>&1 || die "uv is required"
+
+template_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$template_root"
+
+case "$ref" in
+    origin/*)
+        git fetch --quiet origin ||
+            die "'git fetch origin' failed; pass --ref to copy a local ref instead"
+        ;;
+esac
+commit="$(git rev-parse --verify --quiet "$ref^{commit}")" || die "unknown ref: $ref"
+head="$(git rev-parse --verify --quiet HEAD || true)"
+if [ "$head" != "$commit" ]; then
+    echo "init: warning: copying $ref ($(git rev-parse --short "$commit")), not the checked-out HEAD" >&2
+fi
+
+# Stage next to <dest> so the final move is a rename on one file system.
+stage_root="$(mktemp -d "$dest_parent/.init.XXXXXX")"
+trap 'rm -rf "$stage_root"' EXIT
+stage="$stage_root/project"
+mkdir "$stage"
+
+echo "init: copying $ref into a staging directory"
+git archive --format=tar "$commit" | tar -x -f - -C "$stage"
+cd "$stage"
+# `git archive` keeps the directory of an export-ignored file, such as
+# scripts/ for scripts/init. Git does not track empty directories anyway.
+find . -mindepth 1 -type d -empty -delete
+
+# Remove the files that the flags leave out. Paths still use the placeholders.
+if [ "$library" = "true" ]; then
+    rm -f "src/$IMPORT_PLACEHOLDER/cli.py" "src/$IMPORT_PLACEHOLDER/__main__.py" tests/test_cli.py
+fi
+if [ "$publish" = "false" ]; then
+    rm -f .github/workflows/release.yml
+fi
+
+# Remove the content of each dropped marker block, and every marker line.
+drop="template"
+if [ "$library" = "true" ]; then
+    drop="$drop cli"
+fi
+if [ "$publish" = "false" ]; then
+    drop="$drop publish"
+fi
+
+strip_markers() {
+    awk -v drop="$drop" -v file="$1" '
+        BEGIN {
+            count = split(drop, names, " ")
+            for (i = 1; i <= count; i++) dropped[names[i]] = 1
+        }
+        match($0, /init:[a-z]+-begin/) {
+            if (block != "") {
+                printf "init: %s:%d: block %s starts inside block %s\n", file, NR, substr($0, RSTART + 5, RLENGTH - 11), block > "/dev/stderr"
+                failed = 1
+                exit
+            }
+            block = substr($0, RSTART + 5, RLENGTH - 11)
+            skipping = (block in dropped)
+            next
+        }
+        match($0, /init:[a-z]+-end/) {
+            name = substr($0, RSTART + 5, RLENGTH - 9)
+            if (name != block) {
+                printf "init: %s:%d: end of block %s does not match the open block\n", file, NR, name > "/dev/stderr"
+                failed = 1
+                exit
+            }
+            block = ""
+            skipping = 0
+            next
+        }
+        !skipping { print }
+        END {
+            if (!failed && block != "") {
+                printf "init: %s: block %s is never closed\n", file, block > "/dev/stderr"
+                failed = 1
+            }
+            exit failed
+        }
+    ' "$1"
+}
+
+# grep exits 1 when nothing matches, which is not an error here. Only the
+# options that BSD, GNU, and BusyBox grep share are used.
+search() {
+    local status=0
+    grep "$@" || status=$?
+    [ "$status" -le 1 ] || die "grep $* failed with status $status"
+}
+
+# Rewrite a file in place without `sed -i`, which differs between BSD and
+# GNU. Writing back through `cat` keeps the file's mode, including +x.
+rewrite() {
+    local file="$1"
+    shift
+    "$@" <"$file" >"$stage_root/rewrite"
+    cat "$stage_root/rewrite" >"$file"
+}
+
+# Lists of paths are read through here-documents rather than pipelines, so a
+# failure inside a loop stops the script under `set -e`.
+marked_files="$(search -rlE "$MARKER_PATTERN" .)"
+while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    rewrite "$file" strip_markers "$file"
+done <<EOF
+$marked_files
+EOF
+
+substitute() {
+    local expressions
+    expressions="s/$IMPORT_PLACEHOLDER/$import_name/g;s/$DISTRIBUTION_PLACEHOLDER/$distribution/g"
+    if [ "$library" = "false" ]; then
+        # A library has no command, so a leftover command placeholder stays
+        # for the check below to report.
+        expressions="$expressions;s/$COMMAND_PLACEHOLDER/$command_name/g"
+    fi
+    sed -e "$expressions"
+}
+
+# Rename paths that contain a placeholder, deepest first so a directory is
+# renamed after its contents.
+renamed_paths="$(find . -depth -name '*example[-_]*')"
+while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    new_name="$(basename "$path" | substitute)"
+    if [ "$new_name" != "$(basename "$path")" ]; then
+        mv "$path" "$(dirname "$path")/$new_name"
+    fi
+done <<EOF
+$renamed_paths
+EOF
+
+# Keep uv.lock out of the substitution. `uv lock` renames the project's entry
+# and keeps the entries sorted, which a text substitution would not.
+mv uv.lock "$stage_root/uv.lock"
+substituted_files="$(search -rlE 'example[-_](package|command)' .)"
+while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    rewrite "$file" substitute
+done <<EOF
+$substituted_files
+EOF
+
+check_leftovers() {
+    local contents names
+    contents="$(search -rniE "$LEFTOVER_PATTERN" .)"
+    names="$(find . -iname '*example[-_]package*' -o -iname '*example[-_]command*')"
+    if [ -n "$contents$names" ]; then
+        printf '%s\n' "$contents" "$names" | grep -v '^$' >&2
+        die "the template left placeholders or markers behind; fix the template"
+    fi
+}
+
+check_leftovers
+mv "$stage_root/uv.lock" uv.lock
+
+# The template's lock is the starting point, so only the project's own entry
+# changes unless a removed block changed the dependencies.
+echo "init: updating uv.lock"
+uv lock --quiet
+check_leftovers
+
+git init --quiet --initial-branch=main
+git add --all
+
+cd "$template_root"
+if [ -e "$dest" ] || [ -L "$dest" ]; then
+    die "destination appeared while staging: $dest"
+fi
+mv "$stage" "$dest"
+
+cat <<EOF
+init: created $dest with the files staged and nothing committed. Next:
+
+    cd $dest
+    just sync && just hooks-install && just check
+    git commit
+EOF
