@@ -50,6 +50,9 @@ COMMAND_PLACEHOLDER="example-command"
 # once the substitution has run.
 LEFTOVER_PATTERN='example[-_](package|command)|init:[a-z]+-(begin|end)'
 MARKER_PATTERN='init:[a-z]+-(begin|end)'
+# The marker blocks this script knows. Any other block fails, so a template
+# newer than this script cannot leave optional content in by accident.
+MARKER_BLOCKS="template cli publish"
 
 dest=""
 import_name=""
@@ -198,10 +201,12 @@ if [ "$publish" = "false" ]; then
 fi
 
 strip_markers() {
-    awk -v drop="$drop" -v file="$1" '
+    awk -v drop="$drop" -v known="$MARKER_BLOCKS" -v file="$1" '
         BEGIN {
             count = split(drop, names, " ")
             for (i = 1; i <= count; i++) dropped[names[i]] = 1
+            count = split(known, names, " ")
+            for (i = 1; i <= count; i++) known_blocks[names[i]] = 1
         }
         match($0, /init:[a-z]+-begin/) {
             if (block != "") {
@@ -210,6 +215,11 @@ strip_markers() {
                 exit
             }
             block = substr($0, RSTART + 5, RLENGTH - 11)
+            if (!(block in known_blocks)) {
+                printf "init: %s:%d: unknown block %s\n", file, NR, block > "/dev/stderr"
+                failed = 1
+                exit
+            }
             skipping = (block in dropped)
             next
         }

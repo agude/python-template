@@ -60,6 +60,12 @@ CI pass.
 - Actions are pinned to a full commit SHA with a `# vX.Y.Z` comment, every
   checkout sets `persist-credentials: false`, and each workflow starts from
   `permissions: {}`. zizmor enforces this in `just lint`.
+- Dependabot does not update these pins, so bump them by hand:
+  - `just-version` in every workflow.
+  - The uv `version` in the CI lint job. It matches the uv in Dependabot's
+    updater, so the lint job proves that Dependabot can update `uv.lock`.
+    Raise it, and `required-version` in `pyproject.toml`, only after a
+    Dependabot job log shows a newer uv.
 - Each test-matrix leg sets `UV_PYTHON`. Without it, uv follows
   `.python-version` and every leg tests the same interpreter.
 - A Python version in the test matrix is a support claim. Keep the matrix,

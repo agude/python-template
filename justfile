@@ -46,9 +46,33 @@ hooks-install:
         uv run --locked pre-commit install
         exit 0
     fi
+    # Print a path with symbolic links resolved. Its last components may not
+    # exist yet.
+    canonical() {
+        local path="$1" suffix=""
+        while [[ ! -d "$path" ]]; do
+            suffix="/$(basename "$path")$suffix"
+            path="$(dirname "$path")"
+        done
+        printf '%s%s\n' "$(cd "$path" && pwd -P)" "$suffix"
+    }
     # `pre-commit install` refuses to run while core.hooksPath is set, so
     # write a hook that calls the pre-commit runner at Git's effective path.
-    hook="$(git rev-parse --git-path hooks/pre-commit)"
+    # A hooks directory outside this repository is shared with other
+    # repositories, and this project's hook must not replace theirs.
+    hooks_dir="$(canonical "$(git rev-parse --path-format=absolute --git-path hooks)")"
+    top="$(canonical "$(git rev-parse --show-toplevel)")"
+    git_dir="$(canonical "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    case "$hooks_dir/" in
+        "$top/"* | "$git_dir/"*) ;;
+        *)
+            echo "hooks-install: core.hooksPath is $hooks_path, which is outside this repository." >&2
+            echo "hooks-install: Call 'just lint' from the pre-commit hook there, or give this" >&2
+            echo "hooks-install: repository its own: git config core.hooksPath .git/hooks" >&2
+            exit 1
+            ;;
+    esac
+    hook="$hooks_dir/pre-commit"
     content="$(printf '%s\n' \
         '#!/usr/bin/env bash' \
         '# Installed by `just hooks-install`.' \
@@ -122,13 +146,12 @@ release bump:
     echo "release: committed and tagged $tag. Push with: git push origin HEAD $tag"
 # init:publish-begin
 
-# The argument wins over GITHUB_REF_NAME, which CI sets on tag pushes.
-
 # Check that a release tag matches the version in pyproject.toml.
 release-check tag="":
     #!/usr/bin/env bash
     set -euo pipefail
     tag={{ quote(tag) }}
+    # The argument wins over GITHUB_REF_NAME, which CI sets on tag pushes.
     tag="${tag:-${GITHUB_REF_NAME:-}}"
     if [[ -z "$tag" ]]; then
         echo "release-check: pass a tag, or set GITHUB_REF_NAME" >&2

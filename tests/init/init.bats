@@ -159,6 +159,16 @@ assert_no_leftovers() {
     assert_no_dest
 }
 
+@test "an unknown marker block fails without creating dest" {
+    make_fixture
+    printf '# init:docs-begin\nprint("docs")\n# init:docs-end\n' >"$FIXTURE/unknown.py"
+    commit_fixture
+    run "$FIXTURE/scripts/init" "$DEST" my_pkg --ref HEAD
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"unknown block docs"* ]]
+    assert_no_dest
+}
+
 @test "the default project has a CLI and a release workflow" {
     run "$INIT" "$DEST" my_pkg --ref HEAD
     [ "$status" -eq 0 ]
